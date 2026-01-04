@@ -18,7 +18,7 @@ sequenceDiagram
 
     Provider->>API: POST /webhook (Payment Event)
     
-    rect rgb(20, 20, 20)
+
         note right of API: 1. Security (Zero Trust)
         API->>API: Validate HMAC-SHA256 (Signature)
         
@@ -44,7 +44,7 @@ sequenceDiagram
                 API-->>Provider: 201 Created
             end
         end
-    end
+
 ```
 
 ---
