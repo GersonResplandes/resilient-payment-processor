@@ -1,140 +1,122 @@
-# 🛡️ Processador de Pagamentos Resiliente (Webhook Guard)
+# Resilient Payment Processor
+![CI Status](https://github.com/GersonResplandes/resilient-payment-processor/actions/workflows/ci.yml/badge.svg)
 
-> **Handler de Webhooks Enterprise** focado em garantir **Idempotência**, **Consistência de Dados** e **Alta Segurança** para sistemas de pagamento.
+**[🇺🇸 Read in English](README.md)**
 
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)
-![Fastify](https://img.shields.io/badge/Fastify-000000?style=for-the-badge&logo=fastify&logoColor=white)
-![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+Gateway de pagamentos Enterprise-Grade projetado para garantir **Zero Double-Spending** e **Alta Resiliência** no processamento de Webhooks (Stripe, PayPal, etc.). Implementa padrões de arquitetura distribuída para resolver condições de corrida (Race Conditions) sob carga elevada.
 
 ---
 
-## 🌎 Idioma / Language
-- [🇺🇸 English](README.md)
-- [🇧🇷 Português (BR)](README.pt-br.md)
+## 🔒 Fluxo de Resiliência
 
----
+```mermaid
+sequenceDiagram
+    participant Provedor as Webhook (Stripe/PayPal)
+    participant API
+    participant Redis as Redis (Distributed Lock)
+    participant DB as Postgres (ACID)
 
-## 🚀 Visão Geral
-
-Este projeto implementa um Endpoint de API robusto para receber Webhooks de Pagamento (ex: Stripe, PayPal, Pagar.me), resolvendo eficazmente o problema de **Gasto Duplo (Double-Spending)** e **Race Conditions** sob alta concorrência.
-
-Foi projetado com uma arquitetura de **Defesa em Profundidade**, combinando bloqueio distribuído (Redis), transações de banco de dados (Prisma/Postgres) e verificação criptográfica (HMAC).
-
-### Principais Recursos
-
-*   **🔒 Segurança Estrita (HMAC)**: Valida a autenticidade da requisição usando assinaturas SHA-256 sobre o buffer bruto do payload.
-*   **⚡ Guarda de Idempotência**: Estratégia de bloqueio distribuído (Redis Mutex) para impedir o processamento simultâneo da mesma transação.
-*   **💾 Consistência ACID**: Deduplicação em nível de Banco de Dados usando transações interativas do `@prisma/client`.
-*   **🏎️ Alta Performance**: Construído sobre **Fastify** para baixo overhead e alto throughput.
-*   **📝 Logs Estruturados**: Observabilidade via `pino`.
-*   **📑 OpenAPI / Swagger**: Documentação de API gerada automaticamente.
-*   **📦 Arquitetura Singleton**: Injeção de Dependência otimizada para eficiência de recursos.
-
----
-
-## 🛠️ Arquitetura
-
-O fluxo de processamento segue um pipeline rigoroso:
-
-1.  **Middleware de Segurança**: Intercepta a requisição, captura o `Raw Body`, calcula o HMAC-SHA256 e compara com o header `X-Signature` em tempo constante.
-2.  **Controller**: Valida o Schema JSON (Zod) e delega para o Service.
-3.  **Idempotency Service (Camada 1)**: Verifica o Cache Redis. Se processado, retorna imediatamente.
-4.  **Atomic Lock (Camada 2)**: Adquire um lock `SET NX PX` no Redis. Se falhar, a requisição é ignorada (duplicata concorrente).
-5.  **Database Transaction (Camada 3)**: Executa um `findUnique` dentro de uma transação Postgres. Se existir, aborta. Se não, persiste os dados.
-6.  **Commit & Release**: Comita a transação, marca a chave como processada no Redis (TTL 24h) e libera o lock.
-
----
-
-## ⚡ Começando
-
-### Pré-requisitos
-
-*   **Node.js** v18+
-*   **Docker** & **Docker Compose**
-*   **npm**
-
-### Instalação
-
-1.  **Clone o repositório:**
-    ```bash
-    git clone https://github.com/GersonResplandes/resilient-payment-processor.git
-    cd resilient-payment-processor
-    ```
-
-2.  **Configure o Ambiente:**
-    ```bash
-    cp .env.example .env
-    # Ajuste as variáveis se necessário (DB, REDIS, SECRET)
-    ```
-
-3.  **Inicie a Infraestrutura (Redis & Postgres):**
-    ```bash
-    docker-compose up -d
-    ```
-
-4.  **Instale Dependências & Migre:**
-    ```bash
-    npm install
-    npx prisma migrate dev --name init
-    ```
-
----
-
-## 🏃 Executando a Aplicação
-
-| Comando | Descrição |
-| :--- | :--- |
-| `npm run dev` | Inicia servidor em modo desenvolvimento (Hot-reload + Logs Bonitos) |
-| `npm run build` | Compila TypeScript para `dist/` |
-| `npm run start` | Executa o build de produção |
-| `npm run lint` | Executa ESLint para garantir qualidade de código |
-| `npm test` | Executa Testes de Unidade/Integração (Jest) |
-
-### 📖 Documentação da API (Swagger)
-
-Com o servidor rodando, acesse a documentação interativa:
-
-👉 **[http://localhost:3000/docs](http://localhost:3000/docs)**
-
----
-
-## 🧪 Testes
-
-### Unidade & Integração (Jest)
-Execute a suíte de testes automatizados para verificar a lógica e segurança.
-```bash
-npm test
+    Provedor->>API: POST /webhook (Evento de Pagamento)
+    
+    rect rgb(20, 20, 20)
+        note right of API: 1. Segurança (Zero Trust)
+        API->>API: Validação HMAC-SHA256 (Assinatura)
+        
+        note right of API: 2. Lock Distribuído
+        API->>Redis: SET resource:id NX PX 10000
+        Redis-->>API: OK (Lock Adquirido)
+        
+        alt Lock Falhou (Concorrência/Duplicata)
+            API-->>Provedor: 429/409 (Ignorar/Retry Safe)
+        else Lock Sucesso
+            note right of API: 3. Deduplicação ACID
+            API->>DB: BEGIN TRANSACTION
+            API->>DB: SELECT * FROM payments WHERE id = evt_id
+            
+            alt Já Processado
+                API->>DB: ROLLBACK
+                API->>Redis: DEL resource:id
+                API-->>Provedor: 200 OK (Idempotente)
+            else Novo Evento
+                API->>DB: INSERT INTO payments ...
+                API->>DB: COMMIT
+                API->>Redis: DEL resource:id
+                API-->>Provedor: 201 Created
+            end
+        end
+    end
 ```
 
-### Simulação de Concorrência
-Execute o script de stress para simular **20 requisições paralelas** com o mesmo Transaction ID.
+---
+
+## 🏗 Por que isso é necessário?
+
+Sistemas de pagamento ingênuos falham catastroficamente quando:
+1.  **O Provedor Envia Duplicatas:** O Stripe/PayPal frequentemente envia o mesmo webhook múltiplas vezes (garantia *at-least-once*). Sem idempotência estrita, você credita o usuário duas vezes.
+2.  **Requisições Concorrentes:** Duas requisições chegando no mesmo milissegundo podem passar pela verificação `if (!exists)` simultaneamente se não houver Travamento Atômico (Locking).
+
+Este projeto resolve isso com uma abordagem de **Defesa em Profundidade**:
+- **Redis Mutex:** Impede processamento paralelo imediato.
+- **Banco de Dados Relacional:** Garante a verdade única (Source of Truth) via restrições de integridade.
+
+---
+
+## 🚀 Funcionalidades Chave
+
+### 1. Idempotência Robusta
+Combinação de chaves únicas no Postgres com cache distribuído. Mesmo se o cluster escalar para 100 réplicas, o Redis garante que apenas um worker processe um evento específico por vez.
+
+### 2. Segurança Criptográfica (HMAC)
+Nada entra no sistema sem uma assinatura válida. O middleware calcula o hash SHA-256 do payload bruto (`Buffer`) e compara com o header enviado pelo provedor em tempo constante (prevenindo *Timing Attacks*).
+
+### 3. Falha Segura (Fail-Safe)
+Se o banco de dados cair ou o Redis travar, o sistema é projetado para falhar "fechado" (rejeitar a requisição) para que o provedor tente novamente mais tarde, garantindo que nenhum dado seja corrompido ou perdido parcialmente.
+
+---
+
+## 🛠 Tech Stack
+
+- **Runtime:** Node.js / TypeScript (Strict Mode)
+- **Framework:** Fastify (Performance Focada)
+- **Banco de Dados:** PostgreSQL 15 + Prisma ORM
+- **Cache/Lock:** Redis (ioredis com scripts Lua para atomicidade)
+- **Validação:** Zod (Parseamento de Schema)
+- **Testes:** Jest (Testes de Integração com Simulação de Concorrência)
+
+---
+
+## ⚡ Guia Rápido
+
+### 1. Subir Infraestrutura
+Usa Docker Compose para orquestrar Postgres e Redis localmente.
+```bash
+docker-compose up -d
+```
+
+### 2. Configurar Variáveis
+```bash
+cp .env.example .env
+# Configure DATABASE_URL e REDIS_URL
+```
+
+### 3. Instalar e Migrar
+```bash
+npm install
+npm run db:migrate
+```
+
+### 4. Rodar Testes de Concorrência
+Este script dispara 20 requisições simultâneas com o mesmo ID para provar a resiliência do sistema.
 ```bash
 npm run test:concurrency
 ```
-*Resultado Esperado: 1 Sucesso, 19 Ignorados (Seguro).*
 
 ---
 
-## 📁 Estrutura do Projeto
+## 👨‍💻 Autor
 
-```bash
-src/
-├── modules/
-│   └── webhook/
-│       ├── webhook.controller.ts  # HTTP Handler
-│       ├── webhook.service.ts     # Regra de Negócio & Orquestração
-│       ├── idempotency.service.ts # Lógica de Travamento Redis
-│       └── webhook.schema.ts      # Validação Zod
-├── shared/
-│   └── redis.client.ts            # Instância Redis Compartilhada
-├── app.ts                         # Ponto de Entrada (App, Middleware, DI)
-└── ...
-```
+**Gérson Resplandes**
+Engenheiro Backend focado em Arquitetura de Software e Sistemas de Alta Disponibilidade.
 
----
-
-## 📄 Licença
-Este projeto está licenciado sob a Licença ISC.
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/gerson-resplandes-de-s%C3%A1-sousa-999bb33a3/)
+[![Email](https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:maiorgerson@gmail.com)
